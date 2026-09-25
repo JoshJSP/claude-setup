@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""
+validate-skill-bundle.py — the pre-delivery gate, as assertions.
+
+Checks a staged skill directory (and optionally its packed .skill bundle)
+against the criteria the INSTALLER enforces, not against what seems
+sensible. Every check compares a measurement to a bound in the same step:
+an unasserted metric manufactures confidence that no defect exists.
+
+Usage
+-----
+  python3 validate-skill-bundle.py <staged-skill-dir> [--bundle file.skill] [--pack out.skill]
+
+  --pack   writes a well-formed bundle (POSIX separators on any platform)
+           after the directory checks pass, then validates it.
+
+Exit status 0 = every check passed; 1 = at least one failed (all failures
+are listed, not just the first).
+
+Limits are stated as numbers and labelled with where they come from, so
+the check is implementable without guessing and can be updated when the
+consumer changes them.
+"""
+
+import pathlib
+import re
+import struct
+import sys
+import zipfile
+
+MAX_DESCRIPTION_CHARS = 1024   # installer's documented cap on the folded description
+NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")   # kebab-case
+PATH_RE = re.compile(r"`((?:references|scripts|assets)/[^`\s*?]+\.[A-Za-z0-9]+)`")
+BUILD_JUNK = {"__pycache__", ".DS_Store"}
+# Edit residue: strings that only ever enter a file through a failed
+# replacement, an unresolved template slot or an unfinished merge. The gate
+# checks bundle FORM; this is the one CONTENT assertion, because a literal
+# backreference passed apply, gate and install once.
+SLOT_WHY = "unresolved template slot"
+RESIDUE_RES = [
+    (re.compile(r"(?m)^\\[0-9]\s*$"), "literal regex backreference on its own line"),
+    (re.compile(r"(?<![\w`])\\[1-9](?![\w])"), "literal regex backreference in prose"),
+    (re.compile(r"(?m)^(<<<<<<<|=======|>>>>>>>)( |$)"), "merge conflict marker"),
+    (re.compile(r"\{\{[A-Za-z_][A-Za-z0-9_ .-]*\}\}"), SLOT_WHY),
+    (re.compile(r"\b(TODO|FIXME|XXX)\b: ?(fill|replace|write)", re.I), "placeholder note left in"),
+]
+# A file that IS a template carries its slots as the deliverable, not as
+# residue: exempt it from the SLOT rule only — every other residue rule and
+# every other gate check still runs on it, so the exemption never becomes the
+# hand-zip that also skips the checks nobody questioned.
+TEMPLATE_MARKER = "<!-- template: slots intentional -->"
+
+
+def slots_are_intentional(path, body):
+    return "template" in str(path).lower() or body.lstrip().startswith(TEMPLATE_MARKER)
+SECOND_FRONTMATTER_RE = re.compile(r"^---\n.*?\n---\n\s*(---\n|name:|description:)", re.S)
+
+
+def frontmatter(text):
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    return m.group(1) if m else None
+
+
+def folded_description(fm):
+    m = re.search(r"(?ms)^description:\s*>-?\s*\n(.*?)(?=^\S|\Z)", fm)
+    if m:
+        return " ".join(m.group(1).split())
+    m = re.search(r"(?m)^description:\s*(.+)$", fm)
+    return m.group(1).strip().strip('"\'') if m else ""
+
+
+def check_dir(skill_dir, fails):
+    # Resolve before comparing names: Path('.').name is '' for a relative
+    # argument naming the current directory, which false-fails a correct
+    # bundle and blames the frontmatter for an argument problem.
+    skill_dir = pathlib.Path(skill_dir).resolve()
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        fails.append("SKILL.md missing"); return
+    text = skill_md.read_text(encoding="utf-8")
+    fm = frontmatter(text)
+    if fm is None:
+        fails.append("frontmatter: no leading --- block"); return
+    try:
+        import yaml  # optional; fall back to regex checks if absent
+        data = yaml.safe_load(fm)
+        if not isinstance(data, dict):
+            fails.append("frontmatter: does not parse to a mapping")
+            data = {}
+    except ImportError:
+        data = {"name": (re.search(r"(?m)^name:\s*(.+)$", fm) or [None, ""])[1].strip(),
+                "description": folded_description(fm)}
+    except Exception as e:  # yaml error
+        fails.append(f"frontmatter: YAML parse error: {e}"); data = {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        fails.append("frontmatter: `name` missing")
+    elif not NAME_RE.match(name):
+        fails.append(f"frontmatter: `name` not kebab-case: {name!r}")
+    elif name != skill_dir.name:
+        fails.append(f"frontmatter: `name` {name!r} != directory {skill_dir.name!r}")
+    desc = folded_description(fm)
+    if not desc:
+        fails.append("frontmatter: `description` missing")
+    elif len(desc) > MAX_DESCRIPTION_CHARS:
+        fails.append(f"description {len(desc)} chars > cap {MAX_DESCRIPTION_CHARS}")
+    elif len(desc) > 900:
+        print(f"warn: description {len(desc)} chars (cap {MAX_DESCRIPTION_CHARS}) — near the boundary")
+    # Every cited bundled path exists (backticked, real extension — globs in
+    # prose are skipped). Ownership is inferred from the shape of the span, so
+    # the convention has to make the two cases distinguishable: PATH_RE requires
+    # the reserved prefix IMMEDIATELY after the backtick, which means a path
+    # qualified with its owning skill's name — `<skill-name>/references/x.md` —
+    # does not match and is exempt by construction. That qualified form is how a
+    # skill cites a file belonging to a different skill; re-wording a legitimate
+    # cross-reference so the backtick no longer starts with the prefix is not.
+    # The failure message names the convention, because a false FAIL here is
+    # otherwise indistinguishable from a genuinely missing file.
+    for rel in sorted(set(PATH_RE.findall(text))):
+        if not (skill_dir / rel).is_file():
+            fails.append(
+                f"cited path missing from staged set: {rel} "
+                f"— if this file belongs to another skill, cite it as "
+                f"`<skill-name>/{rel}`, which this check exempts")
+    # exactly one frontmatter block: a second `---` block (or stray
+    # name:/description: lines) directly after the first is a duplicated
+    # header that every field check passes by construction
+    if SECOND_FRONTMATTER_RE.match(text):
+        fails.append("frontmatter: a second frontmatter block follows the first")
+    for p in skill_dir.rglob("*"):
+        if p.name in BUILD_JUNK or p.suffix == ".pyc" or p.name.startswith(".~lock"):
+            fails.append(f"build artefact in staged tree: {p.relative_to(skill_dir)}")
+        # content residue in every text file of the bundle, not only SKILL.md
+        if p.is_file() and p.suffix.lower() in (".md", ".txt", ".yml", ".yaml", ".json"):
+            body = p.read_text(encoding="utf-8", errors="replace")
+            # code is where backreferences legitimately live: blank out
+            # fenced blocks and inline spans, keeping line numbers intact
+            prose = re.sub(r"(?ms)^```.*?^```[ \t]*$", lambda m: re.sub(r"[^\n]", " ", m.group(0)), body)
+            prose = re.sub(r"`[^`\n]*`", lambda m: " " * len(m.group(0)), prose)
+            rel = p.relative_to(skill_dir)
+            exempt_slots = slots_are_intentional(rel, body)
+            for rx, why in RESIDUE_RES:
+                if why == SLOT_WHY and exempt_slots:
+                    continue
+                m = rx.search(prose)
+                if m:
+                    line = body.count("\n", 0, m.start()) + 1
+                    fails.append(f"edit residue in {p.relative_to(skill_dir)}:{line}: {why} ({m.group(0).strip()!r})")
+
+
+def pack(src, out):
+    """Always writes POSIX separators, on any platform."""
+    src = pathlib.Path(src)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(p for p in src.rglob("*") if p.is_file()):
+            arc = f"{src.name}/{f.relative_to(src).as_posix()}"
+            assert "\\" not in arc, arc
+            z.write(f, arcname=arc)
+
+
+def check_bundle(path, fails):
+    """Central directory as raw bytes: a convenience reader (zipfile.namelist)
+    rewrites 0x5C to '/' and would report a malformed archive as clean."""
+    data, i, n_members = pathlib.Path(path).read_bytes(), 0, 0
+    while True:
+        i = data.find(b"PK\x01\x02", i)
+        if i < 0:
+            break
+        n, m, k = (struct.unpack_from("<H", data, i + o)[0] for o in (28, 30, 32))
+        name = data[i + 46:i + 46 + n]
+        n_members += 1
+        if b"\x5c" in name:
+            fails.append(f"bundle: backslash in member path {name!r} (installer rejects it)")
+        i += 46 + n + m + k
+    if n_members == 0:
+        fails.append("bundle: no members found")
+
+
+def main(argv):
+    if len(argv) < 2:
+        print(__doc__); return 2
+    skill_dir = argv[1]
+    bundle = pack_to = None
+    if "--bundle" in argv:
+        bundle = argv[argv.index("--bundle") + 1]
+    if "--pack" in argv:
+        pack_to = argv[argv.index("--pack") + 1]
+    fails = []
+    check_dir(skill_dir, fails)
+    if pack_to and not fails:
+        pack(skill_dir, pack_to); bundle = pack_to
+        print(f"packed {pack_to}")
+    if bundle:
+        check_bundle(bundle, fails)
+    if fails:
+        print("FAIL:")
+        for f in fails:
+            print("  -", f)
+        return 1
+    print("OK: all gate checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
