@@ -1,38 +1,45 @@
 # Claude Code setup van Josh
 
-## Wat erin zit
+## Installeren (Windows 10/11)
 
-| Bestand | Wat het doet |
-|---|---|
-| `installeer.bat` | Hierop dubbelklikken, dat start `installeer.ps1` |
-| `installeer.ps1` | Installeert wat mist (Git, Python, Claude Code), dan 20 plugins, kopieert de losse skills en zet de PowerShell-tool aan |
-| `telefoon.bat` / `telefoon.py` | Bestuur Claude Code op je laptop vanaf je telefoon via Telegram (zie onder) |
-| `skills\` | apple-design, graphify, task-observer, transitions-dev, transitions-polish |
+Open **PowerShell** (Start > typ `powershell` > Enter) en plak deze regel:
 
-## Installeren (Windows 10/11, werkt ook op een lege laptop)
+```
+git clone https://github.com/JoshJSP/claude-setup "$HOME\claude-setup"; & "$HOME\claude-setup\installeer.bat"
+```
 
-1. Download deze repo: groene knop **Code** > **Download ZIP**.
-   Pak de zip uit (rechtsklik > "Alles uitpakken"). Niet vanuit de zip starten.
-2. Dubbelklik op `installeer.bat`.
-   - Zegt Windows "Windows heeft uw pc beschermd": klik "Meer informatie" > "Toch uitvoeren".
-   - Vraagt Windows om toestemming voor Git of Python: klik Ja.
-   - Duurt een paar minuten. Wacht tot er "Klaar" staat.
-3. Open een NIEUW PowerShell-venster, typ `claude` en log in met je eigen Claude-account.
-4. Met `/plugin` zie je wat er geïnstalleerd is.
+Log in met je GitHub-account als daarom gevraagd wordt (de repo is prive, Josh moet je eerst uitnodigen).
+Het script installeert alles in een paar minuten en zegt aan het eind "Klaar, alles gelukt".
+Daarna: open een NIEUW PowerShell-venster, typ `claude` en log in met je eigen Claude-account.
 
-Ging er iets mis? Het script zet aan het eind op een rij wat er fout ging en wat je moet doen.
-Meestal is het internet even weg: gewoon opnieuw dubbelklikken, wat al gelukt is blijft staan.
+**"git wordt niet herkend"?** Dan staat Git nog niet op je laptop. Plak eerst dit, sluit PowerShell,
+open hem opnieuw en plak dan de regel hierboven:
+
+```
+winget install --id Git.Git -e
+```
+
+Onderweg:
+- Vraagt Windows om toestemming voor Git of Python: klik Ja.
+- Het script vraagt of Claude nooit meer om toestemming mag vragen. Enter = nee (veiliger).
+- Ging er iets mis? Het script zet aan het eind op een rij wat er fout ging en wat je moet doen.
+  Meestal is het internet even weg: gewoon opnieuw starten, wat al gelukt is blijft staan.
 
 ## Bijwerken
 
-Als Josh iets verandert: download de zip opnieuw en dubbelklik weer op `installeer.bat`.
-Of, als je de repo met Git hebt binnengehaald (`git clone`), in die map:
+Dubbelklik op `installeer.bat` in de map `claude-setup` (in je gebruikersmap).
+Hij haalt zelf de nieuwste versie op (`git pull`) en installeert wat er nieuw is. Er komt niets dubbel.
 
-```
-git pull
-.\installeer.bat
-```
+## Wat je krijgt
 
+| Wat | |
+|---|---|
+| 20 plugins | superpowers, frontend-design, context7, plugin-dev, explanatory-output-style, vercel, unity, ponytail, session-tax, claude-bionify, bedrock, frontend-mobile-development, ui-design, avoid-ai-writing, python-development, javascript-typescript, file-conversion, game-development, jvm-languages, web-quality-skills |
+| 5 skills | apple-design, graphify, task-observer, transitions-dev, transitions-polish |
+| `/hub` | Typ `/hub` in Claude Code: overzicht van alle plugins. `/hub web` opent een pagina waar je met 1 klik installeert |
+| Klaar-melding | Na elke opdracht een Telegram-bericht met wat Claude gedaan heeft (zodra je de telefoonbrug hieronder hebt gekoppeld) |
+| Telefoonbrug | `telefoon.bat`: bestuur Claude Code op je laptop vanaf je telefoon (zie onder) |
+| PowerShell-tool | Claude kan PowerShell-commando's draaien in plaats van alleen Git Bash |
 ## Laptop besturen vanaf je telefoon (via Telegram)
 
 Remote Control van Claude staat op het schoolaccount uit, daarom gaat dit via Telegram.
@@ -48,6 +55,7 @@ Je stuurt de bot een bericht, Claude Code voert het uit op je laptop en stuurt h
 **Daarna**: dubbelklik `telefoon.bat` en stuur je bot opdrachten, bijv. "zet mijn Downloads op volgorde".
 - `/nieuw` begint een nieuw gesprek (anders onthoudt Claude het vorige bericht).
 - Een opdracht duurt al snel 15+ seconden, grote klussen minuten. Je krijgt pas antwoord als het af is.
+- Na het koppelen krijg je ook na elke gewone Claude-opdracht op de laptop een klaar-bericht.
 - Gaat er iets fout (niet ingelogd, limiet bereikt, geen internet, fout token), dan stuurt de bot
   een bericht dat met "Fout:" begint en zegt wat je moet doen. Het staat ook in het venster op de laptop.
 
@@ -58,11 +66,6 @@ Je stuurt de bot een bericht, Claude Code voert het uit op je laptop en stuurt h
   `~\.claude\telefoon.json`. Opnieuw koppelen: verwijder dat bestand.
 - Wil je het hele scherm zien en zelf de muis bewegen? Gebruik dan Chrome Remote Desktop
   (gratis, remotedesktop.google.com). Dat staat los van Claude.
-
-## PowerShell
-
-Het script zet `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` in `~\.claude\settings.json`.
-Claude kan dan PowerShell-commando's draaien in plaats van alleen Git Bash.
 
 ## Kosten
 
@@ -79,6 +82,9 @@ een Vercel-account; het gratis Hobby-account is genoeg.
   met je eigen sleutel volgens hun instructies.
 
 ## Handig om te weten
+
+- Toch nooit meer toestemming vragen, of juist weer wel? Draai `installeer.bat` opnieuw, of zet in `~\.claude\settings.json` `permissions.defaultMode` op `bypassPermissions` (of haal het weg).
+- Geen klaar-berichten meer? Verwijder het blok met `klaar-melden.py` onder `hooks` in `~\.claude\settings.json`.
 
 - Veel plugins = meer tokens per sessie. Wil je er een uitzetten: `claude plugin disable <naam>`
 - "explanatory-output-style" laat Claude uitleg (Insights) geven bij code. Te veel tekst? Zet die uit.

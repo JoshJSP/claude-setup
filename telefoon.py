@@ -5,6 +5,7 @@ Alleen stdlib, dus elke Python 3 werkt.
 Test zonder Telegram:  python telefoon.py --test "zeg ok"
 """
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-CONFIG = Path.home() / ".claude" / "telefoon.json"
+CONFIG = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "telefoon.json"
 WERKMAP = Path.home()
 MAX_TIJD = 20 * 60  # seconden per opdracht
 OPNIEUW_KOPPELEN = f"Verwijder {CONFIG} en start telefoon.bat opnieuw om een nieuw token in te voeren."
@@ -80,7 +81,8 @@ def vraag_claude(opdracht, doorgaan):
     if doorgaan:
         cmd.append("--continue")  # zelfde gesprek als het vorige bericht
     try:
-        r = subprocess.run(cmd, cwd=WERKMAP, capture_output=True, text=True,
+        # TELEFOON_BRUG: de klaar-melding stuurt dit antwoord dan niet nog een keer
+        r = subprocess.run(cmd, cwd=WERKMAP, capture_output=True, text=True, env={**os.environ, "TELEFOON_BRUG": "1"},
                            encoding="utf-8", errors="replace", timeout=MAX_TIJD)
     except subprocess.TimeoutExpired:
         return f"Fout: gestopt na {MAX_TIJD // 60} minuten, de opdracht duurde te lang. Knip hem op in kleinere stukken."
