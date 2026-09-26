@@ -109,8 +109,8 @@ foreach ($m in $marketplaces) {
     # op een laptop die nog nooit via SSH met GitHub praatte ("Host key verification failed")
     $uit = claude plugin marketplace add "https://github.com/$m.git" 2>&1 | ForEach-Object { "$_" } | Out-String
     Write-Host $uit.Trim()
-    # 'already' = stond er al, dat is geen fout
-    if ($LASTEXITCODE -ne 0 -and $uit -notmatch 'already') { $mislukt.Add("Marketplace $m : $($uit.Trim())") }
+    # 'already' = stond er al; 'differs' = stond er al met een andere link (bijv. owner/repo). Geen van beide is een fout
+    if ($LASTEXITCODE -ne 0 -and $uit -notmatch 'already|differs') { $mislukt.Add("Marketplace $m : $($uit.Trim())") }
 }
 foreach ($p in $plugins) {
     Write-Host "Plugin: $p" -ForegroundColor Cyan
